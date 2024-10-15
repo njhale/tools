@@ -1,0 +1,10 @@
+Name: Google Search 
+Share Context: github.com/gptscript-ai/credentials/model-provider
+Description: Return google search results to answer a given question 
+Args: question: A question to search 
+
+#!/usr/bin/env npm --prefix ${GPTSCRIPT_TOOL_DIR} run tool
+
+---
+!metadata:*:Category
+Google Search
