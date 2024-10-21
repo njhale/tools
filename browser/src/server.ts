@@ -1,0 +1,207 @@
+import express, { type Request, type Response } from 'express'
+import bodyParser from 'body-parser'
+import { type BrowserContext, type Page } from 'playwright'
+import { chromium } from 'playwright'
+import { browse, close, filterContent } from './browse.ts'
+import { click } from './click.ts'
+import { fill } from './fill.ts'
+import { enter } from './enter.ts'
+import { check } from './check.ts'
+import { select } from './select.ts'
+import { login } from './login.ts'
+import { scrollToBottom } from './scrollToBottom.ts'
+import { existsSync, mkdirSync } from 'fs'
+import { randomBytes } from 'node:crypto'
+import { Mutex } from 'async-mutex'
+import { screenshot } from './screenshot.ts'
+import path from 'node:path'
+import { loadSettingsFile } from './settings.ts'
+
+const mutex = new Mutex()
+
+async function main (): Promise<void> {
+  console.log('Starting browser server')
+  const settings = loadSettingsFile()
+
+  const app = express()
+  // Get port from the environment variable or use 9888 if it is not defined
+  const port = process.env.PORT ?? 9888
+  delete (process.env.GPTSCRIPT_INPUT)
+  app.use(bodyParser.json())
+
+  const contextMap: Record<string, BrowserContext> = {} // mapping of session ID => browser context
+  const pageMap: Record<string, Record<string, Page>> = {} // mapping of session ID => tab ID => page
+
+  // gptscript requires "GET /" to return 200 status code
+  app.get('/', (req: Request, res: Response) => {
+    res.send('OK')
+  })
+
+  app.post('/reflectHeaders', (req: Request, res: Response) => {
+    res.send(JSON.stringify(req.headers, null, 2))
+  })
+
+  app.post('/getPageContents', (req: Request, res: Response) => {
+    res.send(JSON.stringify(req.headers, null, 2))
+  })
+
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
+  app.post('/*', async (req: Request, res: Response) => {
+    const data = req.body
+    console.log('Request Headers:', JSON.stringify(req.headers, null, 2))
+    console.log('Request Body:', data)
+
+    const model: string = data.model || 'gpt-4o-mini'
+    const website: string = data.website ?? ''
+    const userInput: string = data.userInput ?? ''
+    const keywords: string[] = (data.keywords ?? '').split(',')
+    const filter: string = data.filter ?? ''
+
+    if (process.env.GPTSCRIPT_WORKSPACE_ID === undefined || process.env.GPTSCRIPT_WORKSPACE_DIR === undefined) {
+      res.status(400).send('GPTScript workspace ID and directory are not set')
+      return
+    }
+
+
+    const sessionID = process.env.GPTSCRIPT_WORKSPACE_ID
+    const sessionDir = path.resolve(process.env.GPTSCRIPT_WORKSPACE_DIR) + '/browser_session'
+
+    if (!existsSync(sessionDir)) {
+      mkdirSync(sessionDir)
+    }
+
+    let tabID = randomBytes(8).toString('hex')
+    let printTabID = true
+    if (data.tabID !== undefined) {
+      tabID = data.tabID
+      printTabID = false
+    }
+
+    let context: BrowserContext
+    if (contextMap[sessionID] !== undefined) {
+      context = contextMap[sessionID]
+    } else {
+      context = await chromium.launchPersistentContext(
+        sessionDir,
+        {
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          headless: settings.headless ?? false,
+          viewport: null,
+          channel: 'chrome',
+          args: ['--start-maximized', '--disable-blink-features=AutomationControlled'],
+          ignoreDefaultArgs: ['--enable-automation', '--use-mock-keychain']
+        })
+      contextMap[sessionID] = context
+    }
+
+    context.on('close', () => {
+      console.log('Closing the context')
+      setTimeout(() => {
+        process.exit(0)
+      }, 3000)
+    })
+
+    // We lock the rest of this behind a mutex in order to use one tab at a time.
+    const release = await mutex.acquire()
+
+    let page: Page
+    if (pageMap[sessionID]?.[tabID] !== undefined) {
+      page = pageMap[sessionID][tabID]
+      if (page.isClosed()) {
+        page = await context.newPage()
+        if (pageMap[sessionID] === undefined) {
+          pageMap[sessionID] = {}
+        }
+        pageMap[sessionID][tabID] = page
+      }
+    } else {
+      page = await context.newPage()
+      if (pageMap[sessionID] === undefined) {
+        pageMap[sessionID] = {}
+      }
+      pageMap[sessionID][tabID] = page
+    }
+    await page.bringToFront()
+
+    let allElements = false
+    if (data.allElements === 'true' || data.allElements === true) {
+      allElements = true
+    }
+
+    if (req.path === '/browse') {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+      res.send(await browse(page, website, 'browse', tabID, printTabID, settings))
+    } else if (req.path === '/getFilteredContent') {
+      res.send(await filterContent(page, tabID, printTabID, filter, settings))
+    } else if (req.path === '/getPageContents') {
+      res.send(await browse(page, website, 'getPageContents', tabID, printTabID, settings))
+    } else if (req.path === '/getPageLinks') {
+      res.send(await browse(page, website, 'getPageLinks', tabID, printTabID, settings))
+    } else if (req.path === '/getPageImages') {
+      res.send(await browse(page, website, 'getPageImages', tabID, printTabID, settings))
+    } else if (req.path === '/click') {
+      await click(page, model, userInput, keywords.map((keyword) => keyword.trim()), allElements, (data.matchTextOnly as boolean) ?? false, settings)
+    } else if (req.path === '/fill') {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+      await fill(page, model, userInput, data.content ?? '', keywords, (data.matchTextOnly as boolean) ?? false, settings)
+    } else if (req.path === '/enter') {
+      await enter(page)
+    } else if (req.path === '/check') {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+      await check(page, model, userInput, keywords, (data.matchTextOnly as boolean) ?? false, settings)
+    } else if (req.path === '/select') {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+      await select(page, model, userInput, data.option ?? '', settings)
+    } else if (req.path === '/login') {
+      await login(context, website)
+    } else if (req.path === '/scrollToBottom') {
+      await scrollToBottom(page)
+    } else if (req.path === '/close') {
+      await close(page)
+    } else if (req.path === '/back') {
+      await page.goBack()
+    } else if (req.path === '/forward') {
+      await page.goForward()
+    } else if (req.path === '/screenshot') {
+      await screenshot(page, model, userInput, keywords, (data.filename as string) ?? 'screenshot.png', (data.matchTextOnly as boolean) ?? false, settings)
+    }
+
+    release()
+    res.end()
+  })
+
+  // Start the server
+  const server = app.listen(port, () => {
+    console.log(`Server is listening on port ${port}`)
+  })
+
+  // stdin is used as a keep-alive mechanism. When the parent process dies the stdin will be closed and this process
+  // will exit.
+  process.stdin.resume()
+  process.stdin.on('close', () => {
+    console.log('Closing the server')
+    server.close()
+    process.exit(0)
+  })
+
+  process.on('SIGINT', () => {
+    console.log('Closing the server')
+    server.close()
+    process.exit(0)
+  })
+
+  process.on('SIGTERM', () => {
+    console.log('Closing the server')
+    server.close()
+    process.exit(0)
+  })
+
+  process.on('SIGHUP', () => {
+    console.log('Closing the server')
+    server.close()
+    process.exit(0)
+  })
+}
+
+// eslint-disable-next-line @typescript-eslint/no-floating-promises
+main()
