@@ -19,8 +19,8 @@ export async function getNewContext(workspaceDir: string, javaScriptEnabled: boo
           userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
           headless: true,
           viewport: null,
-          args: ['--start-maximized', '--disable-blink-features=AutomationControlled'],
-          ignoreDefaultArgs: ['--enable-automation', '--use-mock-keychain'],
+          args: ['--start-maximized', '--disable-blink-features=AutomationControlled', '--password-store=basic'],
+          ignoreDefaultArgs: ['--enable-automation'],
           javaScriptEnabled
         })
       break
@@ -32,8 +32,8 @@ export async function getNewContext(workspaceDir: string, javaScriptEnabled: boo
           headless: true,
           viewport: null,
           channel: 'chrome',
-          args: ['--start-maximized', '--disable-blink-features=AutomationControlled'],
-          ignoreDefaultArgs: ['--enable-automation', '--use-mock-keychain'],
+          args: ['--start-maximized', '--disable-blink-features=AutomationControlled', '--use-mock-keychain', '--password-store=basic'],
+          ignoreDefaultArgs: ['--enable-automation'],
           javaScriptEnabled
         })
       break
@@ -55,8 +55,8 @@ export async function getNewContext(workspaceDir: string, javaScriptEnabled: boo
           headless: true,
           viewport: null,
           channel: 'msedge',
-          args: ['--start-maximized', '--disable-blink-features=AutomationControlled'],
-          ignoreDefaultArgs: ['--enable-automation', '--use-mock-keychain'],
+          args: ['--start-maximized', '--disable-blink-features=AutomationControlled', '--password-store=basic'],
+          ignoreDefaultArgs: ['--enable-automation'],
           javaScriptEnabled
         })
       break
@@ -75,10 +75,10 @@ async function getSystemBrowser(): Promise<string> {
   }
 
   const browsers = [
-    { name: 'Chrome', launchFunction: async () => await chromium.launch({ channel: 'chrome' }) },
-    { name: 'Edge', launchFunction: async () => await chromium.launch({ channel: 'msedge' }) },
+    { name: 'Chrome', launchFunction: async () => await chromium.launch({ channel: 'chrome', args: ['--use-mock-keychain', '--password-store=basic'] }) },
+    { name: 'Edge', launchFunction: async () => await chromium.launch({ channel: 'msedge', args: ['--password-store=basic'] }) },
     { name: 'Firefox', launchFunction: async () => await firefox.launch() },
-    { name: 'Chromium', launchFunction: async () => await chromium.launch() }
+    { name: 'Chromium', launchFunction: async () => await chromium.launch({ args: ['--password-store=basic'] }) }
   ]
 
   const errors = []
