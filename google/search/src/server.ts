@@ -41,6 +41,7 @@ async function main (): Promise<void> {
   })
 
   app.post('/*', async (req: Request, res: Response) => {
+    const startTime = Date.now()
 
     try {
       const data = req.body
@@ -182,8 +183,14 @@ async function main (): Promise<void> {
           disableCache: true 
         })
         const focusedSearch = await run.json()
+        // res.status(200).send(focusedSearch)
+        // TODO(njhale): Remove this after debugging
+        const response = {
+          ...focusedSearch,
+          took: (Date.now() - startTime) / 1000
+        }
+        res.status(200).send(response)
 
-        res.status(200).send(focusedSearch)
       })
     } catch (e) {
       // Send a 200 status code GPTScript will pass the error to the LLM
