@@ -263,62 +263,75 @@ func main() {
 		_ = browser.OpenURL(u.String())
 	}
 
+	// Add a context with timeout at the start
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+
 	t := time.NewTicker(2 * time.Second)
-	for range t.C {
-		// Construct the request to get the token from the gateway.
-		req, err := http.NewRequest("GET", tokenURL, nil)
-		if err != nil {
-			fmt.Printf("main: failed to create token request: %v\n", err)
+	defer t.Stop()
+
+	// Add select statement to handle both ticker and timeout
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println("main: timeout waiting for token to be created")
 			os.Exit(1)
-		}
+		case <-t.C:
+			// Construct the request to get the token from the gateway.
+			req, err := http.NewRequest("GET", tokenURL, nil)
+			if err != nil {
+				fmt.Printf("main: failed to create token request: %v\n", err)
+				os.Exit(1)
+			}
 
-		q = req.URL.Query()
-		q.Set("state", state)
-		q.Set("verifier", verifier)
-		req.URL.RawQuery = q.Encode()
+			q = req.URL.Query()
+			q.Set("state", state)
+			q.Set("verifier", verifier)
+			req.URL.RawQuery = q.Encode()
 
-		// Send the request to the gateway.
-		now := time.Now()
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "main: failed to send token request: %v\n", err)
-			continue
-		}
+			// Send the request to the gateway.
+			now := time.Now()
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "main: failed to send token request: %v\n", err)
+				continue
+			}
 
-		if resp.StatusCode != http.StatusOK {
-			_, _ = fmt.Fprintf(os.Stderr, "main: unexpected status code from token request: %d\n", resp.StatusCode)
-			continue
-		}
+			if resp.StatusCode != http.StatusOK {
+				_, _ = fmt.Fprintf(os.Stderr, "main: unexpected status code from token request: %d\n", resp.StatusCode)
+				continue
+			}
 
-		// Parse the response from the gateway.
-		var oauthResp oauthResponse
-		if err := json.NewDecoder(resp.Body).Decode(&oauthResp); err != nil {
-			fmt.Printf("main: failed to decode token response JSON: %v\n", err)
+			// Parse the response from the gateway.
+			var oauthResp oauthResponse
+			if err := json.NewDecoder(resp.Body).Decode(&oauthResp); err != nil {
+				fmt.Printf("main: failed to decode token response JSON: %v\n", err)
+				_ = resp.Body.Close()
+				os.Exit(1)
+			}
 			_ = resp.Body.Close()
-			os.Exit(1)
-		}
-		_ = resp.Body.Close()
 
-		out := cred{
-			Env: map[string]string{
-				env: oauthResp.AccessToken,
-			},
-			RefreshToken: oauthResp.RefreshToken,
-		}
+			out := cred{
+				Env: map[string]string{
+					env: oauthResp.AccessToken,
+				},
+				RefreshToken: oauthResp.RefreshToken,
+			}
 
-		if oauthResp.ExpiresIn > 0 {
-			expiresAt := now.Add(time.Second * time.Duration(oauthResp.ExpiresIn))
-			out.ExpiresAt = &expiresAt
-		}
+			if oauthResp.ExpiresIn > 0 {
+				expiresAt := now.Add(time.Second * time.Duration(oauthResp.ExpiresIn))
+				out.ExpiresAt = &expiresAt
+			}
 
-		credJSON, err := json.Marshal(out)
-		if err != nil {
-			fmt.Printf("main: failed to marshal token credential: %v\n", err)
-			os.Exit(1)
-		}
+			credJSON, err := json.Marshal(out)
+			if err != nil {
+				fmt.Printf("main: failed to marshal token credential: %v\n", err)
+				os.Exit(1)
+			}
 
-		fmt.Print(string(credJSON))
-		os.Exit(0)
+			fmt.Print(string(credJSON))
+			os.Exit(0)
+		}
 	}
 }
 
