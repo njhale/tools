@@ -1,0 +1,21 @@
+
+---
+Name: ServiceNow
+Metadata: bundle: true
+Description: Tools for interacting with ServiceNow
+Share Tools: Print Credential
+
+---
+Name: Print Credential
+Description: Print the ServiceNow OAuth token
+Credential: ./credential
+
+#!/usr/bin/env python3 ${GPTSCRIPT_TOOL_DIR}/main.py
+
+---
+!metadata:*:category
+ServiceNow
+
+---
+!metadata:*:icon
+https://cdn.jsdelivr.net/npm/@phosphor-icons/core@2/assets/duotone/wrench-duotone.svg

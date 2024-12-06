@@ -1,6 +1,9 @@
 tools:
   database:
     reference: ./database
+  servicenow:
+    reference: ./servicenow
+    all: true
   excel:
     reference: ./excel
     all: true
