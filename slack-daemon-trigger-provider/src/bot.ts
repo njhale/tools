@@ -74,7 +74,7 @@ export const startSlackBot = async (
                     );
 
                     if (selectedWorkflow) {
-                        await runWorkflow(selectedWorkflow.workflow, client, channelId, obotServerUrl);
+                        await runWorkflow(selectedWorkflow.workflow, client, channelId);
                         return;
                     }
 
@@ -142,7 +142,7 @@ export const startSlackBot = async (
                 const user = context.userId
 
                 try {
-                    await runWorkflow(selectedWorkflow, client, channel!, obotServerUrl, user);
+                    await runWorkflow(selectedWorkflow, client, channel!, user);
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Failed to invoke workflow. Please try again later.';
                     console.error('Error invoking workflow:', message);
@@ -174,149 +174,156 @@ export const startSlackBot = async (
             workflowId: string,
             client: any,
             channel: string,
-            obotServerUrl: string,
             user?: string
         ) {
             const messageContext: KnownBlock[] = user ? [
                 {
-                    type: 'context',
+                    type: 'context', 
                     elements: [
-                        {
-                            type: 'mrkdwn',
-                            text: `Started by: <@${user}>`
-                        }
+                        { type: 'mrkdwn', text: `Started by: <@${user}>` }
                     ]
                 },
                 {
                     type: 'context',
                     elements: [
-                        {
-                            type: 'mrkdwn',
-                            text: `Workflow ID: <${obotServerUrl}/admin/workflows/${workflowId}|${workflowId}>`
-                        }
+                        { type: 'mrkdwn', text: `Workflow ID: <${obotServerUrl}/admin/workflows/${workflowId}|${workflowId}>` }
                     ]
-                },
+                }
             ] : [];
 
             try {
-                const workflow = await obot.get(`/workflows/${workflowId}`)
-                const workflowName = workflow.data.name
-
+                const workflow = await obot.get(`/workflows/${workflowId}`);
+                const workflowName = workflow.data.name;
 
                 const initialMessage = await client.chat.postMessage({
-                    channel: channel,
+                    channel,
                     blocks: [
-                        {
-                            type: 'section',
-                            text: {
-                                type: 'mrkdwn',
-                                text: `🔄 Running workflow *${workflowName}*...`
-                            }
-                        },
-                        ...messageContext,
+                        { type: 'header', text: { type: 'plain_text', text: `🔄 Running: ${workflowName}` }},
+                        ...messageContext
                     ]
                 });
-                const slackThreadId = initialMessage.ts!;
 
-                console.warn(`Invoking workflow ${workflowId}`)
-                const invokeResponse = await obot.post(`/invoke/${workflowId}`)
-                console.warn(`Invoked workflow ${workflowId}: ${JSON.stringify(invokeResponse.data)}`)
-                const systemThreadId = invokeResponse.data.threadID
+                const invokeResponse = await obot.post(`/invoke/${workflowId}`);
+                const systemThreadId = invokeResponse.data.threadID;
                 messageContext.push({
                     type: 'context',
-                    elements: [
-                        { type: 'mrkdwn', text: `System Thread ID: <${obotServerUrl}/admin/threads/${systemThreadId}|${systemThreadId}>` }
-                    ]
-                })
-
-                await client.chat.update({
-                    channel: channel,
-                    ts: slackThreadId,
-                    blocks: [
-                        {
-                            type: 'section',
-                            text: {
-                                type: 'mrkdwn',
-                                text: `🔄 Workflow *${workflowName}* is in progress...`
-                            }
-                        },
-                        ...messageContext,
-                    ]
+                    elements: [{ type: 'mrkdwn', text: `Thread: <${obotServerUrl}/admin/threads/${systemThreadId}|${systemThreadId}>` }]
                 });
 
-
-                const eventsResponse = await obot.get(`/threads/${systemThreadId}/events?follow=true&waitForThread=true`,
+                const eventsResponse = await obot.get(
+                    `/threads/${systemThreadId}/events?follow=true&waitForThread=true`,
                     {
-                        headers: {
-                            'Authorization': `Bearer ${obotAPIToken}`,
-                            'Accept': 'text/event-stream',
-                        },
-                        responseType: 'stream',
+                        headers: { Accept: 'text/event-stream' },
+                        responseType: 'stream'
                     }
-                )
-                console.warn('Event stream get returned, streaming events...')
+                );
 
                 const parser = createParser({
                     onEvent: async (event: EventSourceMessage) => {
-                        const data = event.data ? JSON.parse(event.data) : {}
-                        console.warn(`Event:\n ${event.event}\n data: ${event.data}`)
-                        if (event.event === 'close') {
-                            return
-                        }
+                        if (event.event === 'close') return;
 
-                        // Handle step events
-                        if (data.step) {
+                        const data = JSON.parse(event.data || '{}');
+                        const { runID, parentRunID, time, content, contentID, waitingOnModel, step, runComplete } = data;
+                        const timestamp = time ? new Date(time).toLocaleString() : new Date().toLocaleString();
+
+                        // Log start of step
+                        if (step) {
                             await client.chat.postMessage({
-                                channel: channel,
-                                thread_ts: slackThreadId,
-                                text: `🔄 Running step: ${data.step.step}`
-                            })
-                        }
-
-                        // Handle step completion events
-                        if (data.contentID && data.content && !data.waitingOnModel) {
-                            await client.chat.postMessage({
-                                channel: channel,
-                                thread_ts: slackThreadId,
-                                text: `✅ Step output: ${data.content}`
-                            })
-                        }
-
-                        // Handle run completion events
-                        if (data.runComplete) {
-                            await client.chat.update({
-                                channel: channel,
-                                ts: slackThreadId,
+                                channel,
+                                thread_ts: initialMessage.ts,
                                 blocks: [
                                     {
                                         type: 'section',
-                                        text: {
-                                            type: 'mrkdwn',
-                                            text: `✅ Workflow *${workflowName}* completed successfully!`
+                                        text: { 
+                                            type: 'mrkdwn', 
+                                            text: [
+                                                `🔄 *Starting Step*: \`${step.step}\``,
+                                                `*Run ID*: \`${runID}\`${parentRunID ? ` (Parent: \`${parentRunID}\`)` : ''}`,
+                                                `*Step ID*: \`${step.id}\``,
+                                                `*Time*: ${timestamp}`
+                                            ].join('\n')
                                         }
-                                    },
-                                    ...messageContext,
+                                    }
                                 ]
-                            })
+                            });
+                        }
+
+                        // Log model waiting state
+                        if (waitingOnModel) {
+                            await client.chat.postMessage({
+                                channel,
+                                thread_ts: initialMessage.ts,
+                                text: `⏳ Waiting for model response... (Content ID: \`${contentID}\`)`
+                            });
+                        }
+
+                        // Log step output
+                        if (contentID && content && !waitingOnModel) {
+                            await client.chat.postMessage({
+                                channel,
+                                thread_ts: initialMessage.ts,
+                                blocks: [
+                                    {
+                                        type: 'section',
+                                        text: { 
+                                            type: 'mrkdwn', 
+                                            text: [
+                                                `📝 *Output* (Content ID: \`${contentID}\`)`,
+                                                '```',
+                                                content,
+                                                '```'
+                                            ].join('\n')
+                                        }
+                                    }
+                                ]
+                            });
+                        }
+
+                        // Log run completion
+                        if (runComplete) {
+                            const message = parentRunID ? 
+                                `✅ Run \`${runID}\` completed` :
+                                `✅ Workflow *${workflowName}* completed successfully!`;
+
+                            await client.chat.postMessage({
+                                channel,
+                                thread_ts: initialMessage.ts,
+                                blocks: [
+                                    {
+                                        type: 'section',
+                                        text: { 
+                                            type: 'mrkdwn', 
+                                            text: `${message}\n*Time*: ${timestamp}` 
+                                        }
+                                    }
+                                ]
+                            });
+
+                            if (!parentRunID) {
+                                await client.chat.update({
+                                    channel,
+                                    ts: initialMessage.ts,
+                                    blocks: [
+                                        { type: 'header', text: { type: 'plain_text', text: `✅ Complete: ${workflowName}` }},
+                                        ...messageContext
+                                    ]
+                                });
+                            }
                         }
                     },
-                    onError: (err) => {
-                        console.error('Error parsing event:', err)
-                    }
-                })
+                    onError: (err) => console.error('Error parsing event:', err)
+                });
 
                 for await (const chunk of eventsResponse.data) {
-                    const decoder = new TextDecoder()
-                    const text = decoder.decode(chunk)
-                    parser.feed(text)
+                    parser.feed(new TextDecoder().decode(chunk));
                 }
             } catch (error) {
                 console.error('Error invoking workflow:', error);
-                throw new Error(`❌ Failed to invoke workflow *${workflowId}*. Please try again later.`, { cause: error });
+                throw new Error(`❌ Failed to invoke workflow *${workflowId}*`, { cause: error });
             }
         }
 
-        bot.command('/obot-list-workflows', async ({ command, client, ack, respond }) => {
+        bot.command('/obot-list-workflows', async ({ command, ack, respond }) => {
             console.warn('/obot-list-workflows:', command)
             await ack()
 
@@ -382,17 +389,54 @@ export const startSlackBot = async (
         bot.command('/obot-get-workflow', async ({ command, ack, respond }) => {
             console.warn('Command received:', command)
             await ack()
-            await respond({
-                text: `Hello <@${command.user_id}>! You ran the command: ${command.text}`,
-            })
+
+            try {
+                const workflowId = command.text.trim()
+                if (!workflowId) {
+                    await respond({
+                        text: `Please provide a workflow ID. Usage: /obot-get-workflow <workflow_id>`
+                    })
+                    return
+                }
+
+                const { data: workflow } = await obot.get(`/workflows/${workflowId}`)
+                const { data: executions } = await obot.get(`/workflows/${workflowId}/executions`)
+
+                const latestExecution = executions[0] || {}
+                const latestState = latestExecution.state || 'No state'
+                const latestError = latestExecution.error || 'No error'
+                const executionCount = executions.length
+
+                await respond({
+                    blocks: [
+                        {
+                            type: 'header',
+                            text: {
+                                type: 'plain_text',
+                                text: 'Workflow Details'
+                            }
+                        },
+                        { type: 'divider' },
+                        {
+                            type: 'section',
+                            text: {
+                                type: 'mrkdwn',
+                                text: `*${workflow.name}*\n*State:* ${latestState}\n*Error:* ${latestError}\n*Runs:* ${executionCount}`
+                            }
+                        },
+                        { type: 'divider' }
+                    ]
+                })
+            } catch (error) {
+                console.error('Error fetching workflow:', error)
+                await respond({
+                    text: `Hello <@${command.user_id}>! I'm sorry, but I couldn't fetch the workflow. Please check the ID and try again.`
+                })
+            }
+
             console.warn('Responded to command:', command.text)
         })
 
-        // Message event handler for "hello"
-        bot.message(async ({ message, say }) => {
-            console.log(`Received message event: ${JSON.stringify(message)}`)
-            await say({ text: 'Hey there!' })
-        })
     }
 
 
