@@ -183,7 +183,7 @@ export const startSlackBot = async (
                     elements: [
                         {
                             type: 'mrkdwn',
-                            text: `*Started by:* <@${user}>`
+                            text: `Started by: <@${user}>`
                         }
                     ]
                 },
@@ -192,7 +192,7 @@ export const startSlackBot = async (
                     elements: [
                         {
                             type: 'mrkdwn',
-                            text: `*Workflow ID:* [${workflowId}](${obotServerUrl}/admin/workflows/${workflowId})`
+                            text: `Workflow ID: <${obotServerUrl}/admin/workflows/${workflowId}|${workflowId}>`
                         }
                     ]
                 },
@@ -225,7 +225,7 @@ export const startSlackBot = async (
                 messageContext.push({
                     type: 'context',
                     elements: [
-                        { type: 'mrkdwn', text: `*System Thread ID:* [${systemThreadId}](${obotServerUrl}/admin/threads/${systemThreadId})` }
+                        { type: 'mrkdwn', text: `System Thread ID: <${obotServerUrl}/admin/threads/${systemThreadId}|${systemThreadId}>` }
                     ]
                 })
 
@@ -244,26 +244,8 @@ export const startSlackBot = async (
                     ]
                 });
 
-                await streamWorkflowEvents(systemThreadId, slackThreadId, client, channel, obotServerUrl, messageContext);
-            } catch (error) {
-                console.error('Error invoking workflow:', error);
-                throw new Error(`❌ Failed to invoke workflow *${workflowId}*. Please try again later.`, { cause: error });
-            }
-        }
 
-        async function streamWorkflowEvents(
-            workflowName: string,
-            systemThreadId: string,
-            slackThreadId: string,
-            client: any,
-            channel: string,
-            messageContext: KnownBlock[]
-        ) {
-            const slackStepMessages: Record<string, string> = {}
-
-            try {
-                console.warn(`Making events request for thread ${systemThreadId}`)
-                const response = await obot.get(`/threads/${systemThreadId}/events?follow=true&waitForThread=true`,
+                const eventsResponse = await obot.get(`/threads/${systemThreadId}/events?follow=true&waitForThread=true`,
                     {
                         headers: {
                             'Authorization': `Bearer ${obotAPIToken}`,
@@ -276,81 +258,61 @@ export const startSlackBot = async (
 
                 const parser = createParser({
                     onEvent: async (event: EventSourceMessage) => {
-                        try {
-                            console.warn(`Event received: ${event.data}`)
-                            const json = JSON.parse(event.data);
+                        const data = event.data ? JSON.parse(event.data) : {}
+                        console.warn(`Event:\n ${event.event}\n data: ${event.data}`)
+                        if (event.event === 'close') {
+                            return
+                        }
 
-                            if (json.step) {
-                                const stepId = json.step.id;
-                                const stepText = `⏳ Step *${json.step.step}* in progress...`;
-                                const outputText = json.content
-                                    ? `\n\n📝 Output:\n\`\`\`${json.content}\`\`\``
-                                    : '';
+                        // Handle step events
+                        if (data.step) {
+                            await client.chat.postMessage({
+                                channel: channel,
+                                thread_ts: slackThreadId,
+                                text: `🔄 Running step: ${data.step.step}`
+                            })
+                        }
 
-                                if (!slackStepMessages[stepId]) {
-                                    // First time seeing this step: Post a new message and store its ts
-                                    const message = await client.chat.postMessage({
-                                        channel,
-                                        thread_ts: slackThreadId,
-                                        text: `${stepText}${outputText}`,
-                                    });
-                                    slackStepMessages[stepId] = message.ts;
-                                } else {
-                                    // Step already exists, update its message
-                                    const finalStepText = json.success
-                                        ? `✅ Step *${json.step.step}* executed successfully.`
-                                        : `❌ Step *${json.step.step}* failed.`;
+                        // Handle step completion events
+                        if (data.contentID && data.content && !data.waitingOnModel) {
+                            await client.chat.postMessage({
+                                channel: channel,
+                                thread_ts: slackThreadId,
+                                text: `✅ Step output: ${data.content}`
+                            })
+                        }
 
-                                    await client.chat.update({
-                                        channel,
-                                        ts: slackStepMessages[stepId],
-                                        text: `${finalStepText}${outputText}`,
-                                    });
-                                }
-                            }
-                        } catch (parseError) {
-                            console.error('Error parsing event data:', parseError);
+                        // Handle run completion events
+                        if (data.runComplete) {
+                            await client.chat.update({
+                                channel: channel,
+                                ts: slackThreadId,
+                                blocks: [
+                                    {
+                                        type: 'section',
+                                        text: {
+                                            type: 'mrkdwn',
+                                            text: `✅ Workflow *${workflowName}* completed successfully!`
+                                        }
+                                    },
+                                    ...messageContext,
+                                ]
+                            })
                         }
                     },
-                    onError: (error) => {
-                        console.error('Error event received:', error);
-                    },
-                });
+                    onError: (err) => {
+                        console.error('Error parsing event:', err)
+                    }
+                })
 
-                for await (const chunk of response.data) {
-                    parser.feed(chunk.toString());
+                for await (const chunk of eventsResponse.data) {
+                    const decoder = new TextDecoder()
+                    const text = decoder.decode(chunk)
+                    parser.feed(text)
                 }
-
-                await client.chat.update({
-                    channel: channel,
-                    ts: slackThreadId,
-                    blocks: [
-                        {
-                            type: 'section',
-                            text: {
-                                type: 'mrkdwn',
-                                text: `🎉 Workflow *${wor}* ran successfully!`
-                            }
-                        },
-                        ...messageContext
-                    ]
-                });
             } catch (error) {
-                console.error('Error establishing event stream:', error);
-                await client.chat.update({
-                    channel: slackThreadId,
-                    ts: slackThreadId,
-                    blocks: [
-                        {
-                            type: 'section',
-                            text: {
-                                type: 'mrkdwn',
-                                text: '❌ Error streaming workflow events.'
-                            }
-                        },
-                        ...messageContext
-                    ]
-                });
+                console.error('Error invoking workflow:', error);
+                throw new Error(`❌ Failed to invoke workflow *${workflowId}*. Please try again later.`, { cause: error });
             }
         }
 
