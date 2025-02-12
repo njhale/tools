@@ -37,14 +37,32 @@ func main() {
 		dbWorkspacePath = "/databases/" + dbFileName
 	)
 
-	// Read the database file from the workspace
-	initialDBData, err := g.ReadFileInWorkspace(ctx, dbWorkspacePath, gptscript.ReadFileInWorkspaceOptions{
+	// Get the current latest revision from the workspace
+	revisionInfos, err := g.ListRevisionsForFileInWorkspace(ctx, dbWorkspacePath, gptscript.ListRevisionsForFileInWorkspaceOptions{
 		WorkspaceID: workspaceID,
 	})
-	var notFoundErr *gptscript.NotFoundInWorkspaceError
-	if err != nil && !errors.As(err, &notFoundErr) {
-		fmt.Printf("Error reading DB file: %v\n", err)
+	if err != nil {
+		fmt.Printf("Error listing database revisions: %v\n", err)
 		os.Exit(1)
+	}
+
+	var revisionID string
+	if len(revisionInfos) > 0 {
+		revisionID = revisionInfos[len(revisionInfos)-1].RevisionID
+	}
+
+	// Read the database file from the workspace
+	var initialDBData []byte
+	if revisionID != "" {
+		initialDBData, err = g.GetRevisionForFileInWorkspace(ctx, dbWorkspacePath, revisionID, gptscript.GetRevisionForFileInWorkspaceOptions{
+			WorkspaceID: workspaceID,
+		})
+
+		var notFoundErr *gptscript.NotFoundInWorkspaceError
+		if err != nil && !errors.As(err, &notFoundErr) {
+			fmt.Printf("Error reading DB file: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	// Create a temporary file for the SQLite database
@@ -74,7 +92,7 @@ func main() {
 	case "runDatabaseCommand":
 		result, err = cmd.RunDatabaseCommand(ctx, dbFile, os.Getenv("SQLITE3_ARGS"))
 		if err == nil {
-			err = saveWorkspaceDB(ctx, g, dbWorkspacePath, dbFile, initialDBData)
+			err = saveWorkspaceDB(ctx, g, dbWorkspacePath, revisionID, dbFile, initialDBData)
 		}
 	case "databaseContext":
 		result, err = cmd.DatabaseContext(ctx, dbFile)
@@ -95,6 +113,7 @@ func saveWorkspaceDB(
 	ctx context.Context,
 	g *gptscript.GPTScript,
 	dbWorkspacePath string,
+	revisionID string,
 	dbFile *os.File,
 	initialDBData []byte,
 ) error {
@@ -108,7 +127,9 @@ func saveWorkspaceDB(
 	}
 
 	if err := g.WriteFileInWorkspace(ctx, dbWorkspacePath, updatedDBData, gptscript.WriteFileInWorkspaceOptions{
-		WorkspaceID: workspaceID,
+		WorkspaceID:    workspaceID,
+		CreateRevision: &([]bool{true}[0]),
+		LatestRevision: revisionID,
 	}); err != nil {
 		return fmt.Errorf("Error writing updated DB file to workspace: %v", err)
 	}
