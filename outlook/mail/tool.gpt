@@ -20,6 +20,7 @@ Description: Lists messages in a folder.
 Share Context: Outlook Mail Context
 Share Context: Datasets Output Context from github.com/gptscript-ai/datasets/filter
 Tools: github.com/gptscript-ai/datasets/filter
+Output Filter: user_tz_output_filter
 Credential: ./credential
 Share Tools: List Mail Folders
 Param: folder_id: The ID of the folder to list messages in.
@@ -45,6 +46,7 @@ Description: Search for messages. At least one of subject, from_address, or from
 Share Context: Outlook Mail Context
 Credential: ./credential
 Share Context: Datasets Output Context from github.com/gptscript-ai/datasets/filter
+Output Filter: user_tz_output_filter
 Tools: github.com/gptscript-ai/datasets/filter
 Share Tools: List Mail Folders
 Param: subject: (Optional) Search query for the subject of the message.
@@ -189,7 +191,7 @@ Type: context
 
 You have access to tools for the Microsoft Outlook Mail API.
 
-Display all dates and times in the user's preferred timezone.
+Display the recieved and sent datetimes of all messages in the user's preferred timezone.
 When the user gives values for dates and times, assume they are in the user's preferred timezone unless otherwise specified by the user.
 When the user uses relative terms like "today", "tomorrow", or "last week", assume the date is the current day in the user's preferred timezone.
 
@@ -209,6 +211,12 @@ Before using the Create Group Thread Message tool, confirm the following with th
 - Whether they want to attach any files.
 
 ## End of instructions for using the Microsoft Outlook Mail tools
+
+---
+Name: user_tz_output_filter
+Description: Filter the output to the user's preferred timezone.
+
+If the user has a preferred timezone, convert the recieved and sent datetimes of all messages in $OUTPUT to the user's preferred timezone and return the updated output. If the user does not have a preferred timezone, return the original output.
 
 ---
 !metadata:*:icon
