@@ -1,5 +1,5 @@
 import { RichText, AtpAgent, AppBskyFeedSearchPosts } from '@atproto/api'
-import { getFirstEmbedCard } from "./embed.ts"
+import { getFirstEmbedCard } from "./embed.js"
 
 export async function searchPosts(
     agent: AtpAgent,

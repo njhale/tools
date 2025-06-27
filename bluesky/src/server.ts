@@ -44,12 +44,14 @@ async function createAgent() {
 
 // Server startup code: only run if this file is executed directly
 if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
-  global.agent = await createAgent()
-  const server = createServer();
-  server.start({
-    transportType: 'stdio'
-  }).then(() => {
-    // Vitest has issues capturing stdout, but stderr works.
-    console.error('server ready')
-  })
+  (async () => {
+    global.agent = await createAgent()
+    const server = createServer();
+    server.start({
+      transportType: 'stdio'
+    }).then(() => {
+      // Vitest has issues capturing stdout, but stderr works.
+      console.error('server ready')
+    })
+  })()
 }
