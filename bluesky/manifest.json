@@ -1,0 +1,74 @@
+{
+  "dxt_version": "0.1",
+  "name": "bluesky-mcp",
+  "display_name": "Bluesky Social",
+  "version": "0.0.1",
+  "description": "MCP server for Bluesky",
+  "author": {
+    "name": "Nick Hale",
+    "email": "njohnhale@gmail.com",
+    "url": "https://github.com/njhale"
+  },
+  "icon": "icon.svg",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/server.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/dist/server.js"
+      ],
+      "env": {
+        "BLUESKY_HANDLE": "${user_config.bluesky_handle}",
+        "BLUESKY_APP_PASSWORD": "${user_config.bluesky_app_password}"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "getProfile",
+      "description": "Get the profile of the authenticated user"
+    },
+    {
+      "name": "createPost",
+      "description": "Create a new post"
+    },
+    {
+      "name": "deletePost",
+      "description": "Delete a post"
+    },
+    {
+      "name": "searchPosts",
+      "description": "Search for posts"
+    },
+    {
+      "name": "searchUsers",
+      "description": "Search for users"
+    }
+  ],
+  "user_config": {
+    "bluesky_handle": {
+      "type": "string",
+      "title": "Bluesky Handle",
+      "description": "Fully qualified Bluesky user handle.",
+      "required": true,
+      "sensitive": false
+    },
+    "bluesky_app_password": {
+      "type": "string",
+      "title": "Bluesky App Password",
+      "description": "Bluesky App Password to authenticate with",
+      "required": true,
+      "sensitive": true
+    }
+  },
+  "keywords": [
+    "Social",
+    "Bluesky"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/obot-platform/tools"
+  }
+}
